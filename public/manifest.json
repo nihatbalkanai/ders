@@ -1,0 +1,26 @@
+{
+    "name": "SmartTest AI",
+    "short_name": "SmartTest",
+    "description": "5-8. sınıf öğrencileri için akıllı soru analiz ve test platformu",
+    "start_url": "./",
+    "display": "standalone",
+    "background_color": "#0f172a",
+    "theme_color": "#6c47ff",
+    "orientation": "portrait-primary",
+    "icons": [
+        {
+            "src": "./icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "./icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ],
+    "categories": [
+        "education"
+    ],
+    "lang": "tr"
+}
