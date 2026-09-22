@@ -8,12 +8,14 @@ use App\Models\Outcome;
 use App\Models\Question;
 use App\Services\AI\AiManager;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class TestController extends Controller
 {
 
     public function generateFromSelected(Request $request)
     {
+        set_time_limit(600); // 10 dakika - AI test üretimi uzun sürebilir
         $user = $request->user();
 
         $validated = $request->validate([
@@ -32,49 +34,50 @@ class TestController extends Controller
             ], 422);
         }
 
-        $imagePaths = $questions->pluck('image_path')->toArray();
-        $outcomeIds = $questions->pluck('outcome_id')->filter()->unique()->values();
+        $aiService = AiManager::resolveImageService();
+        $gradeLevel = $user->grade_level . '. Sınıf';
+        $createdTests = [];
 
-        // Generate 9 similar questions for each selected question
-        $aiService = AiManager::resolveActiveService();
-        $aiQuestions = $aiService->generateTestFromImages(
-            $imagePaths,
-            $user->grade_level
-        );
-
-        // Build the final questions array: for each original question add it first, then its 9 similar ones
-        $finalQuestions = [];
-        $aiIndex = 0;
-
+        // Her seçilen soru için ayrı bir test oluştur (10'ar soru)
         foreach ($questions as $q) {
-            // Add original question
-            $finalQuestions[] = [
-                'question_text' => $q->ocr_text ?: ('Orjinal Soru: ' . ($q->outcome?->name ?? 'Bilinmeyen Kazanım')),
-                'visual_svg' => null,
-                'options' => $q->correct_answer !== null
-                    ? [$q->correct_answer, 'Yanlış A', 'Yanlış B', 'Yanlış C']
-                    : ['Şık A', 'Şık B', 'Şık C', 'Şık D'],
-                'correct_answer' => 0,
-                'is_original' => true,
-                'original_image' => $q->image_url ?? null,
-            ];
+            try {
+                Log::info('Test generation starting for question', ['question_id' => $q->id, 'grade' => $gradeLevel]);
 
-            // Add 9 AI-generated similar questions
-            for ($i = 0; $i < 9 && $aiIndex < count($aiQuestions); $i++, $aiIndex++) {
-                $aiQ = $aiQuestions[$aiIndex];
-                $aiQ['is_original'] = false;
-                $finalQuestions[] = $aiQ;
+                $aiQuestions = $aiService->generateTestFromImages(
+                    [$q->image_path],
+                    $gradeLevel
+                );
+
+                Log::info('Test generation result for question', ['question_id' => $q->id, 'question_count' => count($aiQuestions)]);
+
+                $finalQuestions = [];
+                foreach ($aiQuestions as $aiQ) {
+                    $aiQ['is_original'] = false;
+                    $finalQuestions[] = $aiQ;
+                }
+
+                $outcomeName = $q->outcome?->name ?? 'Genel';
+                $subjectName = $q->subject?->name ?? 'Ders';
+
+                $test = GeneratedTest::create([
+                    'user_id' => $user->id,
+                    'title' => $subjectName . ' - ' . $outcomeName . ' (10 Soru) - ' . now()->format('d.m.Y H:i'),
+                    'questions_data' => $finalQuestions,
+                    'outcome_ids' => $q->outcome_id ? [$q->outcome_id] : [],
+                ]);
+
+                $createdTests[] = $test;
+            } catch (\Exception $e) {
+                Log::error('Test generation failed for question', ['question_id' => $q->id, 'error' => $e->getMessage()]);
+                // Hata olsa bile diğer sorular için devam et
             }
         }
 
-        $test = GeneratedTest::create([
-            'user_id' => $user->id,
-            'title' => 'Özel Test (' . count($questions) . ' Soru × 10) - ' . now()->format('d.m.Y H:i'),
-            'questions_data' => $finalQuestions,
-            'outcome_ids' => $outcomeIds->toArray(),
-        ]);
+        if (empty($createdTests)) {
+            return response()->json(['message' => 'Hiçbir test oluşturulamadı. Lütfen tekrar deneyin.'], 500);
+        }
 
-        return response()->json(['data' => $test]);
+        return response()->json(['data' => $createdTests]);
     }
 
     public function generate(Request $request)
@@ -99,7 +102,7 @@ class TestController extends Controller
 
         // Generate questions via AI (Assuming the active provider supports this method)
         // If not, we fallback to OpenAI or throw
-        $aiService = AiManager::resolveActiveService();
+        $aiService = AiManager::resolveTextService();
         if (method_exists($aiService, 'generateQuestions')) {
             $questions = $aiService->generateQuestions(
                 $outcomeNames,
@@ -156,7 +159,8 @@ class TestController extends Controller
         $correct = 0;
 
         foreach ($questions as $i => $q) {
-            if (isset($answers[$i]) && (int) $answers[$i] === (int) ($q['correct'] ?? -1)) {
+            $correctAnswer = $q['correct_answer'] ?? $q['correct'] ?? -1;
+            if (isset($answers[$i]) && (int) $answers[$i] === (int) $correctAnswer) {
                 $correct++;
             }
         }
@@ -179,5 +183,35 @@ class TestController extends Controller
         $test->delete();
 
         return response()->json(['message' => 'Test başarıyla silindi.']);
+    }
+
+    /**
+     * Save AI-generated image URL for a specific question in a test.
+     * Called by Puter.js after generating an image on the client side.
+     */
+    public function saveQuestionImage(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'question_index' => 'required|integer|min:0',
+            'image_url' => 'required|string',
+        ]);
+
+        $test = GeneratedTest::where('user_id', $request->user()->id)->findOrFail($id);
+        
+        $questionsData = $test->questions_data;
+        if (!is_array($questionsData)) {
+            $questionsData = json_decode($questionsData, true);
+        }
+
+        $index = $validated['question_index'];
+        if (isset($questionsData[$index])) {
+            $questionsData[$index]['ai_generated_image_url'] = $validated['image_url'];
+            $test->questions_data = $questionsData;
+            $test->save();
+
+            return response()->json(['message' => 'Resim URL kaydedildi.']);
+        }
+
+        return response()->json(['message' => 'Soru bulunamadı.'], 404);
     }
 }

@@ -1,7 +1,8 @@
 import axios from 'axios';
 
 const api = axios.create({
-    baseURL: (import.meta.env.VITE_APP_URL ? new URL(import.meta.env.VITE_APP_URL).pathname : '') + '/api',
+    baseURL: (import.meta.env.VITE_APP_URL ? new URL(import.meta.env.VITE_APP_URL).pathname.replace(/\/+$/, '') : '') + '/api',
+    timeout: 600000, // 10 dakika - AI test üretimi uzun sürebilir
     headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',

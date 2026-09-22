@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Storage;
 class OpenAIService implements AiProviderInterface
 {
     private string $apiKey;
-    private string $model = 'gpt-4o';
+    private string $model = 'gpt-4o-mini';
 
     public function __construct(string $apiKey)
     {
@@ -104,7 +104,7 @@ Sadece JSON döndür, başka bir şey yazma.";
     /**
      * Generate questions for given outcomes using GPT-4o.
      */
-    public function generateQuestions(array $outcomeNames, int $count = 5, int $gradeLevel = 5): array
+    public function generateQuestions(array $outcomeNames, int $count = 5, string|int $gradeLevel = '7. Sınıf'): array
     {
         $outcomesText = implode(', ', $outcomeNames);
 
@@ -159,75 +159,106 @@ Sadece JSON array döndür, başka bir şey yazma.";
 
     /**
      * Generate custom questions by analyzing uploaded images.
+     * Generates 9 similar questions per image.
      */
-    public function generateTestFromImages(array $imagePaths, string $gradeLevel = '7. Sınıf'): array
+    public function generateTestFromImages(array $images, string|int $gradeLevel = '7. Sınıf'): array
     {
-        $systemPrompt = "Sen uzman bir eğitimci ve soru yazarısın. Türkiye'deki {$gradeLevel} müfredatına ve soru mantığına tam hakimsin.
-1. Sana gönderilen orijinal soru fotoğraflarını incele. Orijinal sorulardaki denklemlerin, matematiksel/mantıksal yapının ve zorluk derecesinin ÖZÜNÜ kavra.
-2. Ardından o mantığa tamamen uygun, yapı olarak benzer ama KESİNLİKLE YENİ 5 adet çoktan seçmeli soru üret.
-3. ÇOK ÖNEMLİ: Eğer üreteceğin soru (orijinalinde olduğu gibi) geometrik bir şekil, bir tablo, bir şema veya herhangi bir grafiğe ihtiyaç duyuyorsa, bu çizimi \"visual_svg\" alanına geçerli, standart bir SVG kodu (vektörel çizim formunda `<svg>...</svg>`) olarak yaz! Eğer sorunun görsel bir çizime ihtiyacı yoksa (sadece metin yetiyorsa) bu alanı `null` bırak.
-4. Çıktı formatı ŞU JSON DİZİSİ (Array) olmalıdır:
-[
-  {
-    \"question\": \"Soru metni...\",
-    \"visual_svg\": \"<svg viewBox='0 0 100 100'>...</svg>\" veya null,
-    \"options\": [\"A şıkkı\", \"B şıkkı\", \"C şıkkı\", \"D şıkkı\"],
-    \"correct\": 0
-  }
-]
-correct alanı doğru cevabın index numarasıdır (0-A, 1-B vs). Sadece bu JSON dizisini döndür.";
+        $allQuestions = [];
 
-        $contentArr = [
-            [
-                'type' => 'text',
-                'text' => 'Aşağıdaki orijinal soruları analiz et ve kurallara uygun 5 YENİ benzer soru üret.'
-            ]
-        ];
+        foreach ($images as $imagePath) {
+            if (!$imagePath || !is_string($imagePath)) continue;
 
-        foreach ($imagePaths as $path) {
-            $fullPath = Storage::disk('public')->path($path);
-            if (file_exists($fullPath)) {
-                $imageData = base64_encode(file_get_contents($fullPath));
-                $mimeType = mime_content_type($fullPath);
-                $contentArr[] = [
-                    'type' => 'image_url',
-                    'image_url' => [
-                        'url' => "data:{$mimeType};base64,{$imageData}"
-                    ]
-                ];
+            $fullPath = storage_path('app/public/' . $imagePath);
+            if (!file_exists($fullPath)) continue;
+
+            $imageData = base64_encode(file_get_contents($fullPath));
+            $mimeType = mime_content_type($fullPath);
+            $imageQuestions = [];
+            $attempts = 0;
+
+            while (count($imageQuestions) < 10 && $attempts < 3) {
+                $attempts++;
+                $needed = 10 - count($imageQuestions);
+
+                $systemPrompt = "Sen uzman bir MEB LGS test hazırlama öğretmenisin. {$gradeLevel} müfredatına uygun beceri temelli (yeni nesil) sorular hazırlıyorsun.
+Resimdeki soruyu incele. Aynı kazanım ve zorlukta ama farklı rakam/isim/hikaye ile tam {$needed} adet yeni çoktan seçmeli soru üret.
+
+KURALLAR:
+- Her soruyu çöz, doğru cevabı kontrol et. Yanlış cevaplı soru ASLA üretme.
+- correct_answer: doğru şıkkın 0-3 indeksi
+- Doğru cevabı farklı şıklara dağıt (hep A olmasın)
+- Geometrik şekilleri sözel açıkla, SVG/HTML üretme
+
+JSON formatı (sadece dizi döndür):
+[{\"question_text\":\"...\",\"options\":[\"şık1\",\"şık2\",\"şık3\",\"şık4\"],\"correct_answer\":0}]
+
+Tam {$needed} soru üret. Sadece JSON dizisi döndür.";
+
+                try {
+                    $response = Http::withToken($this->apiKey)
+                        ->timeout(180)
+                        ->post('https://api.openai.com/v1/chat/completions', [
+                            'model' => $this->model,
+                            'messages' => [
+                                ['role' => 'system', 'content' => $systemPrompt],
+                                ['role' => 'user', 'content' => [
+                                    ['type' => 'image_url', 'image_url' => ['url' => "data:{$mimeType};base64,{$imageData}"]],
+                                    ['type' => 'text', 'text' => "Bu soruyu incele ve {$needed} adet yeni MEB LGS tarzı benzer soru üret."],
+                                ]],
+                            ],
+                            'max_tokens' => 16000,
+                            'response_format' => ['type' => 'json_object'],
+                        ]);
+
+                    if ($response->failed()) {
+                        Log::error('OpenAI generateTestFromImages error', ['body' => $response->body()]);
+                        continue;
+                    }
+
+                    $finishReason = $response->json('choices.0.finish_reason', '');
+                    $content = $response->json('choices.0.message.content', '');
+                    $content = preg_replace('/```json\s*|\s*```/i', '', $content);
+                    
+                    // Try to extract JSON array from response
+                    $questions = null;
+                    
+                    // First try: direct parse
+                    $decoded = json_decode(trim($content), true);
+                    if (is_array($decoded)) {
+                        // If response is {"questions": [...]} wrapper, unwrap it
+                        if (isset($decoded['questions']) && is_array($decoded['questions'])) {
+                            $questions = $decoded['questions'];
+                        } elseif (isset($decoded[0])) {
+                            $questions = $decoded;
+                        }
+                    }
+                    
+                    // Second try: extract array from content  
+                    if (!$questions && preg_match('/\[.*\]/s', $content, $matches)) {
+                        $questions = json_decode($matches[0], true);
+                    }
+
+                    if ($questions && is_array($questions)) {
+                        $imageQuestions = array_merge($imageQuestions, $questions);
+                        Log::info("OpenAI generated questions", [
+                            'attempt' => $attempts,
+                            'requested' => $needed,
+                            'received' => count($questions),
+                            'total' => count($imageQuestions),
+                            'finish_reason' => $finishReason
+                        ]);
+                    } else {
+                        Log::error('OpenAI JSON parse error', ['content' => substr($content, 0, 500), 'finish_reason' => $finishReason]);
+                    }
+                } catch (\Exception $e) {
+                    Log::error('OpenAI generateTestFromImages exception', ['message' => $e->getMessage()]);
+                }
             }
+
+            $allQuestions = array_merge($allQuestions, array_slice($imageQuestions, 0, 10));
         }
 
-        try {
-            $response = Http::withToken($this->apiKey)
-                ->timeout(90) // Might take longer for multiple images
-                ->post('https://api.openai.com/v1/chat/completions', [
-                    'model' => $this->model,
-                    'messages' => [
-                        ['role' => 'system', 'content' => $systemPrompt],
-                        ['role' => 'user', 'content' => $contentArr],
-                    ],
-                    'max_tokens' => 4000,
-                ]);
-
-            if ($response->failed()) {
-                Log::error('OpenAI generateTestFromImages error', ['body' => $response->body()]);
-                return $this->fallbackTestFromImages();
-            }
-
-            $content = $response->json('choices.0.message.content', '');
-            $content = preg_replace('/```json\s*|\s*```/', '', $content);
-            $questions = json_decode(trim($content), true);
-
-            if (!$questions || !is_array($questions)) {
-                return $this->fallbackTestFromImages();
-            }
-
-            return $questions;
-        } catch (\Exception $e) {
-            Log::error('OpenAI generateTestFromImages exception', ['message' => $e->getMessage()]);
-            return $this->fallbackTestFromImages();
-        }
+        return $allQuestions ?: $this->fallbackTestFromImages();
     }
 
     private function fallbackAnalysis(): array
@@ -260,10 +291,9 @@ correct alanı doğru cevabın index numarasıdır (0-A, 1-B vs). Sadece bu JSON
     {
         return [
             [
-                'question' => "API Hatası: Yapay Zeka servisine ulaşılamadı. Lütfen tekrar deneyin.",
-                'visual_svg' => null,
+                'question_text' => "API Hatası: Yapay Zeka servisine ulaşılamadı. Lütfen tekrar deneyin.",
                 'options' => ['A', 'B', 'C', 'D'],
-                'correct' => 0,
+                'correct_answer' => 0,
             ]
         ];
     }

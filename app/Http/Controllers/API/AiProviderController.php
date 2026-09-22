@@ -28,17 +28,29 @@ class AiProviderController extends Controller
         return response()->json(['message' => 'API Anahtarı güncellendi.', 'data' => $provider]);
     }
 
-    public function setActive($id)
+    public function setActive(Request $request, $id)
     {
+        $request->validate([
+            'type' => 'required|string|in:text,image'
+        ]);
+
+        $type = $request->type;
         $provider = AiProvider::findOrFail($id);
 
-        // Deactivate all others
-        AiProvider::where('id', '!=', $id)->update(['is_active' => false]);
+        if ($type === 'text') {
+            AiProvider::where('id', '!=', $id)->update(['is_active_text' => false]);
+            $provider->is_active_text = true;
+        } else {
+            AiProvider::where('id', '!=', $id)->update(['is_active_image' => false]);
+            $provider->is_active_image = true;
+        }
         
-        // Activate chosen
-        $provider->is_active = true;
         $provider->save();
 
-        return response()->json(['message' => $provider->name . ' aktif edildi.', 'data' => AiProvider::all()]);
+        $typeName = $type === 'text' ? 'Metin Üretimi' : 'Görsel Analiz';
+        return response()->json([
+            'message' => "{$provider->name}, {$typeName} için aktif edildi.", 
+            'data' => AiProvider::all()
+        ]);
     }
 }

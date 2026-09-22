@@ -51,7 +51,7 @@ class QuestionController extends Controller
         }
 
         // Automatic entry via AI
-        $aiService = AiManager::resolveActiveService();
+        $aiService = AiManager::resolveImageService();
         $analysis = $aiService->analyzeImage(Storage::disk('public')->path($path));
 
         $subject = Subject::firstOrCreate(['name' => $analysis['subject']]);

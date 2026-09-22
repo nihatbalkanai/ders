@@ -37,6 +37,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/tests/{id}', [TestController::class, 'show']);
     Route::delete('/tests/{id}', [TestController::class, 'destroy']);
     Route::post('/tests/{id}/submit', [TestController::class, 'submit']);
+    Route::post('/tests/{id}/save-image', [TestController::class, 'saveQuestionImage']);
     
     // AI Providers
     Route::prefix('ai-providers')->group(function () {

@@ -4,38 +4,59 @@ namespace App\Services\AI;
 
 use App\Models\AiProvider;
 use App\Services\OpenAIService;
-use App\Services\AI\GeminiService;
 use Exception;
 
 class AiManager
 {
     /**
-     * Resolves and returns the currently active AI Service from the database.
+     * Resolves and returns the AI Service configured for Text Generation.
      * 
      * @return AiProviderInterface
-     * @throws Exception if no active provider is found or identifier is unknown
      */
-    public static function resolveActiveService(): AiProviderInterface
+    public static function resolveTextService(): AiProviderInterface
     {
-        // For CLI or initial migrations where DB might not be ready, fallback safely
         try {
-            $activeProvider = AiProvider::where('is_active', true)->first();
+            $activeProvider = AiProvider::where('is_active_text', true)->first();
         } catch (Exception $e) {
             $activeProvider = null;
         }
 
         if (!$activeProvider) {
-            // Fallback to OpenAI if database isn't configured yet
             return new OpenAIService(config('services.openai.api_key', env('OPENAI_API_KEY', '')));
         }
 
-        switch ($activeProvider->identifier) {
+        return self::instantiateProvider($activeProvider);
+    }
+
+    /**
+     * Resolves and returns the AI Service configured for Image Generation/Analysis.
+     * 
+     * @return AiProviderInterface
+     */
+    public static function resolveImageService(): AiProviderInterface
+    {
+        try {
+            $activeProvider = AiProvider::where('is_active_image', true)->first();
+        } catch (Exception $e) {
+            $activeProvider = null;
+        }
+
+        if (!$activeProvider) {
+            return new OpenAIService(config('services.openai.api_key', env('OPENAI_API_KEY', '')));
+        }
+
+        return self::instantiateProvider($activeProvider);
+    }
+
+    private static function instantiateProvider(AiProvider $provider): AiProviderInterface
+    {
+        switch ($provider->identifier) {
             case 'openai':
-                return new OpenAIService($activeProvider->api_key ?? '');
-            case 'gemini':
-                return new GeminiService($activeProvider->api_key ?? '');
+                return new OpenAIService($provider->api_key ?? '');
+            case 'deepseek':
+                return new DeepSeekService($provider->api_key ?? '');
             default:
-                throw new Exception("Unknown AI Provider identifier: {$activeProvider->identifier}");
+                throw new Exception("Unknown AI Provider identifier: {$provider->identifier}");
         }
     }
 }

@@ -2,7 +2,7 @@
     <div class="test-page">
         <div class="page-header fade-in">
             <h1>Yapay Zeka <span class="gradient-text">Ayarları</span></h1>
-            <p>Sistemin kullanacağı yapay zeka modelini buradan seçebilir ve yapılandırabilirsiniz.</p>
+            <p>Sistemin metin üretimi ve görsel analizi için kullanacağı yapay zeka modellerini buradan seçebilirsiniz.</p>
         </div>
 
         <div v-if="loading" class="loading-grid mt-4">
@@ -10,7 +10,7 @@
         </div>
 
         <div v-else class="providers-grid mt-4">
-            <div v-for="provider in providers" :key="provider.id" class="provider-card glass-card slide-up" :class="{ 'is-active': provider.is_active }">
+            <div v-for="provider in providers" :key="provider.id" class="provider-card glass-card slide-up" :class="{ 'is-active': provider.is_active_text || provider.is_active_image }">
                 <div class="provider-header">
                     <div class="provider-title">
                         <div class="provider-icon">
@@ -20,8 +20,11 @@
                         </div>
                         <h2>{{ provider.name }}</h2>
                     </div>
-                    <div class="status-badge" :class="provider.is_active ? 'badge-active' : 'badge-inactive'">
-                        {{ provider.is_active ? 'Aktif Model' : 'Pasif' }}
+                    <div class="status-badge" :class="(provider.is_active_text || provider.is_active_image) ? 'badge-active' : 'badge-inactive'">
+                        <span v-if="provider.is_active_text && provider.is_active_image">Tümü Aktif</span>
+                        <span v-else-if="provider.is_active_text">Metin Aktif</span>
+                        <span v-else-if="provider.is_active_image">Görsel Aktif</span>
+                        <span v-else>Pasif</span>
                     </div>
                 </div>
 
@@ -45,18 +48,27 @@
                             </button>
                         </div>
 
-                        <div class="action-row">
+                        <div class="action-row" style="flex-wrap: wrap;">
                             <button type="submit" class="btn-secondary btn-sm" :disabled="savingKey === provider.id">
                                 {{ savingKey === provider.id ? 'Kaydediliyor...' : 'Anahtarı Kaydet' }}
                             </button>
                             <button 
-                                v-if="!provider.is_active" 
+                                v-if="!provider.is_active_text" 
                                 type="button"
                                 class="btn-primary btn-sm" 
-                                @click="makeActive(provider.id)"
+                                @click="makeActive(provider.id, 'text')"
                                 :disabled="togglingActive"
                             >
-                                Bu Modeli Etkinleştir
+                                Metin Üretimi İçin Etkinleştir
+                            </button>
+                            <button 
+                                v-if="!provider.is_active_image" 
+                                type="button"
+                                class="btn-primary btn-sm" 
+                                @click="makeActive(provider.id, 'image')"
+                                :disabled="togglingActive"
+                            >
+                                Görsel Analiz İçin Etkinleştir
                             </button>
                         </div>
                     </form>
@@ -81,6 +93,7 @@ const getRoleDescription = (identifier) => {
     switch (identifier) {
         case 'openai': return "Sektör lideri ChatGPT (GPT-4o) görüş ve metin yeteneklerini kullanır.";
         case 'gemini': return "Google Gemini 1.5 Pro veya Flash vizyon modellerini kullanır.";
+        case 'deepseek': return "Açık kaynak destekli, güçlü ve uygun maliyetli dil modeli. (Sadece metin).";
         default: return "Özel yapay zeka modeli.";
     }
 };
@@ -121,13 +134,13 @@ const saveKey = async (provider) => {
     }
 };
 
-const makeActive = async (id) => {
+const makeActive = async (id, type) => {
     togglingActive.value = true;
     try {
-        const res = await api.post(`/ai-providers/${id}/set-active`);
+        const res = await api.post(`/ai-providers/${id}/set-active`, { type });
         providers.value = res.data.data; // Refresh list
         Swal.fire({
-            title: 'Aktif Edildi!',
+            title: 'Başarılı!',
             text: res.data.message,
             icon: 'success',
             timer: 1500,

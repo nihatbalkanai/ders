@@ -20,4 +20,14 @@ interface AiProviderInterface
      * @return array Array of questions
      */
     public function generateTestFromImages(array $images, string $gradeLevel = '7. Sınıf'): array;
+
+    /**
+     * Metin tabanlı kazanımlar için soru üretir.
+     * 
+     * @param array $outcomeNames
+     * @param int $count
+     * @param string|int $gradeLevel
+     * @return array
+     */
+    public function generateQuestions(array $outcomeNames, int $count = 5, string|int $gradeLevel = '7. Sınıf'): array;
 }

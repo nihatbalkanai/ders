@@ -234,11 +234,24 @@ const generateCustomTest = async () => {
             question_ids: selectedQuestions.value
         });
         
+        const tests = res.data.data;
+        const testCount = Array.isArray(tests) ? tests.length : 1;
+        
         // Reset selection
         selectedQuestions.value = [];
         
-        // Navigate to the newly created test
-        router.push({ name: 'test-view', params: { id: res.data.data.id } });
+        Swal.fire({
+            title: 'Testler Oluşturuldu!',
+            text: `${testCount} adet test başarıyla oluşturuldu (her biri 10 soru).`,
+            icon: 'success',
+            timer: 2000,
+            showConfirmButton: false,
+            background: '#1e293b',
+            color: '#f8fafc',
+        });
+
+        // Navigate to tests list page
+        router.push('/tests');
     } catch (e) {
         const msg = e.response?.data?.message || 'Test oluşturulurken bir hata oluştu.';
         Swal.fire('Hata!', msg, 'error');

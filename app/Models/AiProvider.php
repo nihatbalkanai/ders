@@ -12,11 +12,13 @@ class AiProvider extends Model
     protected $fillable = [
         'name',
         'api_key',
-        'is_active',
-        'identifier', // e.g. 'openai', 'gemini'
+        'is_active_text',
+        'is_active_image',
+        'identifier', // e.g. 'openai', 'gemini', 'deepseek'
     ];
 
     protected $casts = [
-        'is_active' => 'boolean',
+        'is_active_text' => 'boolean',
+        'is_active_image' => 'boolean',
     ];
 }
